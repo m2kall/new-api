@@ -1,92 +1,98 @@
 const express = require('express');
-const path = require('path');
-const { scanProxyIPs, scanCloudflareIPs } = require('./scanner');
+const cors = require('cors');
 const cron = require('node-cron');
+const path = require('path');
+const IPScanner = require('./services/scanner');
+const { getAllIPs } = require('./services/ipSources');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 安全设置
-app.disable('x-powered-by');
-
 // 中间件
+app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// 存储扫描结果
-let proxyResults = [];
-let cloudflareResults = [];
+// 初始化扫描器
+const scanner = new IPScanner();
 
-// API 路由
-app.get('/api/proxy-ips', (req, res) => {
-  res.json({ success: true, data: proxyResults, lastUpdate: new Date().toISOString() });
-});
+// 启动时加载之前的结果
+scanner.loadResults();
 
+// API路由
 app.get('/api/cloudflare-ips', (req, res) => {
-  res.json({ success: true, data: cloudflareResults, lastUpdate: new Date().toISOString() });
+  const results = scanner.getResults();
+  res.json({
+    success: true,
+    data: results.cloudflare,
+    lastUpdate: results.lastUpdate
+  });
 });
 
-app.post('/api/scan/proxy', async (req, res) => {
-  try {
-    console.log('开始扫描代理IP...');
-    proxyResults = await scanProxyIPs();
-    res.json({ success: true, message: '代理IP扫描完成', count: proxyResults.length });
-  } catch (error) {
-    res.status(500).json({ success: false, message: '扫描失败: ' + error.message });
+app.get('/api/proxy-ips', (req, res) => {
+  const results = scanner.getResults();
+  res.json({
+    success: true,
+    data: results.proxyIPs,
+    lastUpdate: results.lastUpdate
+  });
+});
+
+app.get('/api/domains', (req, res) => {
+  const results = scanner.getResults();
+  res.json({
+    success: true,
+    data: results.domains,
+    lastUpdate: results.lastUpdate
+  });
+});
+
+app.get('/api/status', (req, res) => {
+  res.json({
+    success: true,
+    status: scanner.getScanStatus()
+  });
+});
+
+// 手动触发扫描（用于测试）
+app.post('/api/scan', async (req, res) => {
+  if (scanner.getScanStatus().isScanning) {
+    return res.json({
+      success: false,
+      message: 'Scan already in progress'
+    });
   }
+
+  // 异步执行扫描
+  const ipSources = getAllIPs();
+  scanner.performScan(ipSources);
+
+  res.json({
+    success: true,
+    message: 'Scan started'
+  });
 });
 
-app.post('/api/scan/cloudflare', async (req, res) => {
-  try {
-    console.log('开始扫描Cloudflare IP...');
-    cloudflareResults = await scanCloudflareIPs();
-    res.json({ success: true, message: 'Cloudflare IP扫描完成', count: cloudflareResults.length });
-  } catch (error) {
-    res.status(500).json({ success: false, message: '扫描失败: ' + error.message });
-  }
-});
-
-// SPA 兜底或首页
-app.get('*', (req, res) => {
+// 首页路由
+app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// 定时任务
-async function startPeriodicScanning() {
-  // 每小时扫描一次代理IP
-  cron.schedule('0 * * * *', async () => {
-    try {
-      console.log('定时扫描代理IP...');
-      proxyResults = await scanProxyIPs();
-      console.log(`代理IP扫描完成，找到 ${proxyResults.length} 个IP`);
-    } catch (error) {
-      console.error('代理IP扫描失败:', error.message);
-    }
-  });
+// 定时任务 - 每6小时扫描一次
+cron.schedule('0 */6 * * *', async () => {
+  console.log('Starting scheduled scan...');
+  const ipSources = getAllIPs();
+  await scanner.performScan(ipSources);
+});
 
-  // 每2小时扫描一次Cloudflare IP
-  cron.schedule('0 */2 * * *', async () => {
-    try {
-      console.log('定时扫描Cloudflare IP...');
-      cloudflareResults = await scanCloudflareIPs();
-      console.log(`Cloudflare IP扫描完成，找到 ${cloudflareResults.length} 个IP`);
-    } catch (error) {
-      console.error('Cloudflare IP扫描失败:', error.message);
-    }
-  });
-
-  // 启动时执行一次扫描
-  try {
-    console.log('初始化扫描...');
-    proxyResults = await scanProxyIPs();
-    cloudflareResults = await scanCloudflareIPs();
-    console.log('初始化扫描完成');
-  } catch (error) {
-    console.error('初始化扫描失败:', error.message);
-  }
-}
+// 启动时执行一次扫描
+setTimeout(async () => {
+  console.log('Performing initial scan...');
+  const ipSources = getAllIPs();
+  await scanner.performScan(ipSources);
+}, 5000); // 延迟5秒启动
 
 app.listen(PORT, () => {
-  console.log(`服务器运行在端口 ${PORT}`);
-  startPeriodicScanning();
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
