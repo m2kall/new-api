@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IP扫描器 - 代理IP & Cloudflare优选IP</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            padding: 30px;
+        }
+
+        .section {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 25px;
+        }
+
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            border-bottom: 3px solid #007bff;
+            padding-bottom: 10px;
+        }
+
+        .ip-list {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            background: white;
+        }
+
+        .ip-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            transition: background-color 0.2s ease;
+        }
+
+        .ip-item:hover {
+            background-color: #f1f3f4;
+        }
+
+        .ip-item:last-child {
+            border-bottom: none;
+        }
+
+        .ip-address {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .ip-details {
+            font-size: 0.8em;
+            color: #6c757d;
+            margin-top: 4px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .ip-info {
+            text-align: right;
+            font-size: 0.85em;
+            color: #6c757d;
+        }
+
+        .ip-info div {
+            margin-bottom: 2px;
+        }
+
+        .status {
+            padding: 15px 30px;
+            text-align: center;
+            background: #e9ecef;
+            font-style: italic;
+            color: #6c757d;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                grid-template-columns: 1fr;
+                gap: 20px;
+                padding: 20px;
+            }
+            
+            .button-group {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌐 IP扫描器</h1>
+            <p>自动扫描美国代理IP和Cloudflare优选IP地址</p>
+        </div>
+
+        <div class="controls">
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="scanProxyIPs()">
+                    🔍 扫描代理IP
+                </button>
+                <button class="btn btn-success" onclick="scanCloudflareIPs()">
+                    ⚡ 扫描Cloudflare IP
+                </button>
+                <button class="btn btn-primary" onclick="refreshAll()">
+                    🔄 刷新全部
+                </button>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="section">
+                <h2>🇺🇸 美国代理IP</h2>
+                <div class="stats">
+                    <div class="stat-item">
+                        <div class="stat-number" id="proxyCount">0</div>
+                        <div class="stat-label">可用IP</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="proxyIPv4">0</div>
+                        <div class="stat-label">IPv4</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="proxyIPv6">0</div>
+                        <div class="stat-label">IPv6</div>
+                    </div>
+                </div>
+                <div class="ip-list" id="proxyList">
+                    <div class="status">点击"扫描代理IP"开始扫描...</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>☁️ Cloudflare优选IP</h2>
+                <div class="stats">
+                    <div class="stat-item">
+                        <div class="stat-number" id="cfCount">0</div>
+                        <div class="stat-label">优选IP</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="cfIPv4">0</div>
+                        <div class="stat-label">IPv4</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="cfIPv6">0</div>
+                        <div class="stat-label">IPv6</div>
+                    </div>
+                </div>
+                <div class="ip-list" id="cloudflareList">
+                    <div class="status">点击"扫描Cloudflare IP"开始扫描...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 扫描代理IP
+        async function scanProxyIPs() {
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<span class="loading"></span>扫描中...';
+            
+            document.getElementById('proxyList').innerHTML = '<div class="status"><span class="loading"></span>正在扫描代理IP，请稍候...</div>';
+
+            try {
+                const response = await fetch('/api/scan/proxy', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    loadProxyIPs();
+                } else {
+                    document.getElementById('proxyList').innerHTML = `<div class="status">❌ 扫描失败: ${result.message}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('proxyList').innerHTML = `<div class="status">❌ 网络错误: ${error.message}</div>`;
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+
+        // 扫描Cloudflare IP
+        async function scanCloudflareIPs() {
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<span class="loading"></span>扫描中...';
+            
+            document.getElementById('cloudflareList').innerHTML = '<div class="status"><span class="loading"></span>正在扫描Cloudflare IP，请稍候...</div>';
+
+            try {
+                const response = await fetch('/api/scan/cloudflare', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    loadCloudflareIPs();
+                } else {
+                    document.getElementById('cloudflareList').innerHTML = `<div class="status">❌ 扫描失败: ${result.message}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('cloudflareList').innerHTML = `<div class="status">❌ 网络错误: ${error.message}</div>`;
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+
+        // 加载代理IP列表
+        async function loadProxyIPs() {
+            try {
+                const response = await fetch('/api/proxy-ips');
+                const result = await response.json();
+                
+                if (result.success && result.data.length > 0) {
+                    const ipv4Count = result.data.filter(ip => ip.type === 'IPv4').length;
+                    const ipv6Count = result.data.filter(ip => ip.type === 'IPv6').length;
+                    
+                    document.getElementById('proxyCount').textContent = result.data.length;
+                    document.getElementById('proxyIPv4').textContent = ipv4Count;
+                    document.getElementById('proxyIPv6').textContent = ipv6Count;
+                    
+                    const listHTML = result.data.map(ip => `
+                        <div class="ip-item">
+                            <div>
+                                <div class="ip-address">${ip.format}</div>
+                                <div class="ip-details">IP: ${ip.ip}</div>
+                            </div>
+                            <div class="ip-info">
+                                <div>端口: ${ip.port || 'N/A'}</div>
+                            </div>
+                        </div>
+                    `).join('');
+                    
+                    document.getElementById('proxyList').innerHTML = listHTML;
+                } else {
+                    document.getElementById('proxyList').innerHTML = '<div class="status">暂无可用的代理IP</div>';
+                }
+            } catch (error) {
+                document.getElementById('proxyList').innerHTML = `<div class="status">❌ 加载失败: ${error.message}</div>`;
+            }
+        }
+
+        // 加载Cloudflare IP列表
+        async function loadCloudflareIPs() {
+            try {
+                const response = await fetch('/api/cloudflare-ips');
+                const result = await response.json();
+                
+                if (result.success && result.data.length > 0) {
+                    const ipv4Count = result.data.filter(ip => ip.type === 'IPv4').length;
+                    const ipv6Count = result.data.filter(ip => ip.type === 'IPv6').length;
+                    
+                    document.getElementById('cfCount').textContent = result.data.length;
+                    document.getElementById('cfIPv4').textContent = ipv4Count;
+                    document.getElementById('cfIPv6').textContent = ipv6Count;
+                    
+                    const listHTML = result.data.map(ip => `
+                        <div class="ip-item">
+                            <div>
+                                <div class="ip-address">${ip.format}</div>
+                                <div class="ip-details">IP: ${ip.ip}</div>
+                            </div>
+                            <div class="ip-info">
+                                <div>延迟: ${ip.latency}ms</div>
+                                <div>速度: ${ip.speed}</div>
+                            </div>
+                        </div>
+                    `).join('');
+                    
+                    document.getElementById('cloudflareList').innerHTML = listHTML;
+                } else {
+                    document.getElementById('cloudflareList').innerHTML = '<div class="status">暂无可用的Cloudflare优选IP</div>';
+                }
+            } catch (error) {
+                document.getElementById('cloudflareList').innerHTML = `<div class="status">❌ 加载失败: ${error.message}</div>`;
+            }
+        }
+
+        // 刷新全部数据
+        async function refreshAll() {
+            loadProxyIPs();
+            loadCloudflareIPs();
+        }
+
+        // 页面加载时获取现有数据
+        window.addEventListener('load', () => {
+            loadProxyIPs();
+            loadCloudflareIPs();
+        });
+    </script>
+</body>
+</html>
