@@ -266,7 +266,7 @@ class IPScanner {
 
       for (const ip of cfIpsToScan) {
         const result = await this.scanIP(ip, 'cloudflare');
-        if (result && (result.alive || result.httpStatus !== 0)) { // 仅保留 ping 通或 HTTP 有响应的
+        if (result && result.alive && result.httpStatus >= 200 && result.httpStatus < 300) {
           cloudflareResults.push(result);
           console.log(`✓ [CF] IP ${ip} 添加 (延迟: ${result.latency}ms, 响应: ${result.responseTime}ms, HTTP: ${result.httpStatus})`);
         } else {
@@ -291,7 +291,7 @@ class IPScanner {
         }
 
         const result = await this.scanIP(ip, providerOrigin);
-        if (result && (result.alive || result.httpStatus !== 0)) {
+        if (result && result.alive && result.httpStatus >= 200 && result.httpStatus < 300) {
           proxyResults.push(result);
           console.log(`✓ [${providerOrigin.toUpperCase()}] IP ${ip} 添加 (延迟: ${result.latency}ms, 响应: ${result.responseTime}ms, HTTP: ${result.httpStatus})`);
         } else {
