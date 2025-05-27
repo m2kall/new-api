@@ -248,9 +248,9 @@ class IPScanner {
     console.log('开始从IP池进行全面扫描...');
 
     const {
-        cloudflareScanCount = 20, // 扫描多少个Cloudflare IP
-        proxyScanCount = 30,      // 扫描多少个其他代理IP
-        ipsPerCidrForCloudflare = 2, // 每个Cloudflare CIDR中取多少IP
+        cloudflareScanCount = 50, // 扫描多少个Cloudflare IP
+        proxyScanCount = 60,      // 扫描多少个其他代理IP
+        ipsPerCidrForCloudflare = 3, // 每个Cloudflare CIDR中取多少IP
         ipsPerCidrForProxy = 1,   // 每个其他代理CIDR中取多少IP
         scanDelay = 50,           // 每个IP扫描之间的延迟（毫秒）
     } = options;
