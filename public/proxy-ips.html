@@ -1,26 +1,90 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代理IP列表</title>
     <style>
-        body { 
-            font-family: monospace; 
-            white-space: pre-line; 
-            margin: 0; 
-            padding: 20px; 
-            background: #f5f5f5; 
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #1a1a1a;
+            color: #00ff00;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00ff00;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .ip-list {
+            background-color: #000;
+            padding: 20px;
+            border-radius: 5px;
+            border: 1px solid #333;
+            white-space: pre-line;
+            font-size: 14px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #00ff00;
+            text-decoration: none;
+            border: 1px solid #00ff00;
+            padding: 8px 16px;
+            border-radius: 3px;
+        }
+        .back-link:hover {
+            background-color: #00ff00;
+            color: #000;
+        }
+        .last-update {
+            text-align: center;
+            margin-top: 20px;
+            color: #888;
+            font-size: 12px;
         }
     </style>
 </head>
-<body id="content">加载中...</body>
-<script>
-fetch('/proxy-ips')
-    .then(response => response.text())
-    .then(data => {
-        document.getElementById('content').textContent = data;
-    })
-    .catch(error => {
-        document.getElementById('content').textContent = '加载失败';
-    });
-</script>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← 返回首页</a>
+        <h1>代理IP列表</h1>
+        <div class="ip-list" id="ipList">加载中...</div>
+        <div class="last-update" id="lastUpdate"></div>
+    </div>
+
+    <script>
+        async function loadIPs() {
+            try {
+                const response = await fetch('/api/proxy-ips');
+                const data = await response.json();
+                
+                if (data.success && data.data.length > 0) {
+                    let output = '';
+                    data.data.forEach(ip => {
+                        const location = `${ip.location.country} ${ip.location.region} ${ip.location.city}`;
+                        output += `${ip.ip} # ${location}, ${ip.latency}ms, ${ip.speed}\n`;
+                    });
+                    document.getElementById('ipList').textContent = output;
+                    document.getElementById('lastUpdate').textContent = `最后更新: ${new Date(data.lastUpdate).toLocaleString()}`;
+                } else {
+                    document.getElementById('ipList').textContent = '# 暂无数据';
+                }
+            } catch (error) {
+                document.getElementById('ipList').textContent = '# 加载失败';
+                console.error('Error loading IPs:', error);
+            }
+        }
+
+        loadIPs();
+        // 每30秒刷新一次
+        setInterval(loadIPs, 30000);
+    </script>
+</body>
 </html>

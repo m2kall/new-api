@@ -66,13 +66,11 @@ app.post('/api/scan', async (req, res) => {
   });
 });
 
-// 纯文本页面 - 代理IP
+// 纯文本页面 - 代理IP（移除IPv4/IPv6标题）
 app.get('/proxy-ips', async (req, res) => {
   const results = scanner.getResults();
   let output = '';
   
-  // IPv4 部分
-  output += 'IPv4\n';
   if (results.proxyIPs && results.proxyIPs.length > 0) {
     results.proxyIPs.forEach(ip => {
       const location = `${ip.location.country} ${ip.location.region} ${ip.location.city}`;
@@ -82,19 +80,15 @@ app.get('/proxy-ips', async (req, res) => {
     output += '# 暂无数据\n';
   }
   
-  output += '\nIPv6\n# 暂无IPv6数据\n';
-  
   res.set('Content-Type', 'text/plain; charset=utf-8');
   res.send(output);
 });
 
-// 纯文本页面 - 优选IP
+// 纯文本页面 - 优选IP（移除IPv4/IPv6标题）
 app.get('/yx-ips', async (req, res) => {
   const results = scanner.getResults();
   let output = '';
   
-  // IPv4 部分
-  output += 'IPv4\n';
   if (results.cloudflare && results.cloudflare.length > 0) {
     results.cloudflare.forEach(item => {
       const location = `${item.location.country} ${item.location.region} ${item.location.city}`;
@@ -103,8 +97,6 @@ app.get('/yx-ips', async (req, res) => {
   } else {
     output += '# 暂无数据\n';
   }
-  
-  output += '\nIPv6\n# 暂无IPv6数据\n';
   
   res.set('Content-Type', 'text/plain; charset=utf-8');
   res.send(output);
