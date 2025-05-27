@@ -42,7 +42,7 @@
 - `POST /api/scan` - 手动触发扫描
 - `GET /health` - 健康检查
 
-现在访问路径完全符合README.md的描述，用户可以直接使用：
+访问地址：
 - `https://你的域名/proxy-ips` 获取纯文本格式的代理IP
 - `https://你的域名/yx-ips` 获取纯文本格式的优选IP
 - `https://你的域名/proxy-ips.html` 获取HTML格式的代理IP页面
