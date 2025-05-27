@@ -17,52 +17,27 @@
         </header>
 
         <div class="tabs">
-            <button class="tab-button active" data-tab="cloudflare">Cloudflare IP</button>
-            <button class="tab-button" data-tab="domains">优选域名</button>
+            <button class="tab-button active" data-tab="cloudflare">优选 IP</button>
             <button class="tab-button" data-tab="proxy">代理 IP</button>
         </div>
 
         <div class="tab-content">
-            <!-- Cloudflare IP Tab -->
+            <!-- 优选IP Tab -->
             <div id="cloudflare" class="tab-panel active">
                 <div class="section">
-                    <h2>IPv4 地址</h2>
-                    <div class="ip-grid" id="cloudflare-ipv4">
-                        <div class="loading">正在加载数据...</div>
-                    </div>
-                </div>
-                
-                <div class="section">
-                    <h2>IPv6 地址</h2>
-                    <div class="ip-grid" id="cloudflare-ipv6">
-                        <div class="no-data">暂无 IPv6 数据</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 优选域名 Tab -->
-            <div id="domains" class="tab-panel">
-                <div class="section">
-                    <h2>优选域名列表</h2>
-                    <div class="domain-grid" id="domains-list">
+                    <h2>Cloudflare 优选 IP/域名</h2>
+                    <div class="ip-grid" id="cloudflare-list">
                         <div class="loading">正在加载数据...</div>
                     </div>
                 </div>
             </div>
 
-            <!-- 代理 IP Tab -->
+            <!-- 代理IP Tab -->
             <div id="proxy" class="tab-panel">
                 <div class="section">
-                    <h2>代理 IPv4</h2>
-                    <div class="ip-grid" id="proxy-ipv4">
+                    <h2>代理 IP（非Cloudflare美国IP）</h2>
+                    <div class="ip-grid" id="proxy-list">
                         <div class="loading">正在加载数据...</div>
-                    </div>
-                </div>
-                
-                <div class="section">
-                    <h2>代理 IPv6</h2>
-                    <div class="ip-grid" id="proxy-ipv6">
-                        <div class="no-data">暂无 IPv6 数据</div>
                     </div>
                 </div>
             </div>

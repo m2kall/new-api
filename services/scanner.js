@@ -6,9 +6,8 @@ const path = require('path');
 class IPScanner {
   constructor() {
     this.results = {
-      cloudflare: { ipv4: [], ipv6: [] },
-      domains: [],
-      proxyIPs: { ipv4: [], ipv6: [] },
+      cloudflare: [], // 优选IP（Cloudflare域名和IP）
+      proxyIPs: [],   // 代理IP（非Cloudflare的美国IP）
       lastUpdate: new Date().toISOString()
     };
     this.isScanning = false;
@@ -18,33 +17,36 @@ class IPScanner {
   async testLatency(host) {
     try {
       const result = await ping.promise.probe(host, {
-        timeout: 5,
-        extra: ['-c', '3']
+        timeout: 3,
+        extra: ['-c', '2']
       });
       
       return {
         alive: result.alive,
-        time: result.time === 'unknown' ? 999 : parseFloat(result.time),
+        time: result.time === 'unknown' ? 999 : parseFloat(result.time) || 999,
         packetLoss: result.packetLoss || '0%'
       };
     } catch (error) {
+      console.log(`Ping failed for ${host}:`, error.message);
       return { alive: false, time: 999, packetLoss: '100%' };
     }
   }
 
-  // 测试网络速度（简化版）
+  // 简化的速度测试
   async testSpeed(host) {
     try {
       const start = Date.now();
       const response = await axios.get(`http://${host}`, {
-        timeout: 10000,
+        timeout: 5000,
         maxRedirects: 0,
         validateStatus: () => true
       });
       const end = Date.now();
       
       const responseTime = end - start;
-      const speed = responseTime < 1000 ? 'Fast' : responseTime < 3000 ? 'Medium' : 'Slow';
+      let speed = 'Slow';
+      if (responseTime < 500) speed = 'Fast';
+      else if (responseTime < 1500) speed = 'Medium';
       
       return {
         responseTime,
@@ -60,45 +62,47 @@ class IPScanner {
     }
   }
 
-  // 获取IP归属地（模拟）
+  // 获取IP归属地
   async getLocation(ip) {
     try {
-      // 使用免费的IP地理位置API
-      const response = await axios.get(`http://ip-api.com/json/${ip}`, {
-        timeout: 5000
+      const response = await axios.get(`http://ip-api.com/json/${ip}?fields=country,regionName,city,isp`, {
+        timeout: 3000
       });
       
-      if (response.data.status === 'success') {
+      if (response.data.status !== 'fail') {
         return {
-          country: response.data.country,
-          region: response.data.regionName,
-          city: response.data.city,
-          isp: response.data.isp
+          country: response.data.country || 'Unknown',
+          region: response.data.regionName || 'Unknown',
+          city: response.data.city || 'Unknown',
+          isp: response.data.isp || 'Unknown'
         };
       }
     } catch (error) {
-      console.log(`Location lookup failed for ${ip}:`, error.message);
+      console.log(`Location lookup failed for ${ip}`);
     }
     
     return {
       country: 'Unknown',
-      region: 'Unknown',
+      region: 'Unknown', 
       city: 'Unknown',
       isp: 'Unknown'
     };
   }
 
   // 扫描单个IP
-  async scanIP(ip, type = 'ipv4') {
-    console.log(`Scanning ${ip}...`);
+  async scanIP(ip) {
+    console.log(`Scanning IP: ${ip}`);
     
     const latency = await this.testLatency(ip);
+    if (!latency.alive) {
+      return null;
+    }
+
     const speed = await this.testSpeed(ip);
     const location = await this.getLocation(ip);
     
     return {
       ip,
-      type,
       latency: latency.time,
       alive: latency.alive,
       packetLoss: latency.packetLoss,
@@ -111,17 +115,28 @@ class IPScanner {
 
   // 扫描域名
   async scanDomain(domain) {
-    console.log(`Scanning domain ${domain}...`);
+    console.log(`Scanning domain: ${domain}`);
     
     const latency = await this.testLatency(domain);
+    if (!latency.alive) {
+      return null;
+    }
+
     const speed = await this.testSpeed(domain);
     
     return {
+      ip: domain, // 使用域名作为显示
       domain,
       latency: latency.time,
       alive: latency.alive,
       speed: speed.speed,
       responseTime: speed.responseTime,
+      location: {
+        country: 'Global',
+        region: 'CDN',
+        city: 'Cloudflare',
+        isp: 'Cloudflare'
+      },
       lastTest: new Date().toISOString()
     };
   }
@@ -134,98 +149,102 @@ class IPScanner {
     }
 
     this.isScanning = true;
-    console.log('Starting IP scan...');
+    console.log('Starting comprehensive IP scan...');
 
     try {
-      // 扫描Cloudflare IPv4
-      const cloudflareIPv4 = [];
-      for (const ip of ipSources.cloudflare.slice(0, 20)) {
-        const result = await this.scanIP(ip, 'ipv4');
-        if (result.alive) {
-          cloudflareIPv4.push(result);
-        }
-      }
+      const cloudflareResults = [];
+      const proxyResults = [];
 
-      // 扫描代理IP
-      const proxyIPv4 = [];
-      for (const ip of ipSources.proxyIPs.slice(0, 15)) {
-        const result = await this.scanIP(ip, 'ipv4');
-        if (result.alive) {
-          proxyIPv4.push(result);
-        }
-      }
-
-      // 扫描域名
-      const domains = [];
-      for (const domain of ipSources.domains.slice(0, 15)) {
+      // 扫描Cloudflare优选域名
+      console.log('Scanning Cloudflare domains...');
+      for (const domain of ipSources.domains.slice(0, 10)) {
         const result = await this.scanDomain(domain);
-        if (result.alive) {
-          domains.push(result);
+        if (result) {
+          cloudflareResults.push(result);
         }
+        await this.delay(100); // 避免请求过快
       }
 
-            // 更新结果
-            this.results = {
-                cloudflare: {
-                  ipv4: cloudflareIPv4.sort((a, b) => a.latency - b.latency).slice(0, 20),
-                  ipv6: [] // 暂时不扫描IPv6
-                },
-                domains: domains.sort((a, b) => a.latency - b.latency).slice(0, 20),
-                proxyIPs: {
-                  ipv4: proxyIPv4.sort((a, b) => a.latency - b.latency).slice(0, 20),
-                  ipv6: [] // 暂时不扫描IPv6
-                },
-                lastUpdate: new Date().toISOString()
-              };
-        
-              // 保存结果到文件
-              await this.saveResults();
-              console.log('Scan completed successfully');
-        
-            } catch (error) {
-              console.error('Scan error:', error);
-            } finally {
-              this.isScanning = false;
-            }
-          }
-        
-          // 保存结果到文件
-          async saveResults() {
-            try {
-              const dataDir = path.join(__dirname, '../data');
-              await fs.mkdir(dataDir, { recursive: true });
-              await fs.writeFile(
-                path.join(dataDir, 'results.json'),
-                JSON.stringify(this.results, null, 2)
-              );
-            } catch (error) {
-              console.error('Failed to save results:', error);
-            }
-          }
-        
-          // 加载结果
-          async loadResults() {
-            try {
-              const dataPath = path.join(__dirname, '../data/results.json');
-              const data = await fs.readFile(dataPath, 'utf8');
-              this.results = JSON.parse(data);
-            } catch (error) {
-              console.log('No previous results found, using defaults');
-            }
-          }
-        
-          // 获取结果
-          getResults() {
-            return this.results;
-          }
-        
-          // 获取扫描状态
-          getScanStatus() {
-            return {
-              isScanning: this.isScanning,
-              lastUpdate: this.results.lastUpdate
-            };
-          }
+      // 扫描Cloudflare IP
+      console.log('Scanning Cloudflare IPs...');
+      for (const ip of ipSources.cloudflare.slice(0, 15)) {
+        const result = await this.scanIP(ip);
+        if (result) {
+          cloudflareResults.push(result);
         }
-        
-        module.exports = IPScanner;
+        await this.delay(100);
+      }
+
+      // 扫描代理IP（非Cloudflare）
+      console.log('Scanning proxy IPs...');
+      for (const ip of ipSources.proxyIPs.slice(0, 15)) {
+        const result = await this.scanIP(ip);
+        if (result) {
+          proxyResults.push(result);
+        }
+        await this.delay(100);
+      }
+
+      // 更新结果
+      this.results = {
+        cloudflare: cloudflareResults.sort((a, b) => a.latency - b.latency).slice(0, 20),
+        proxyIPs: proxyResults.sort((a, b) => a.latency - b.latency).slice(0, 20),
+        lastUpdate: new Date().toISOString()
+      };
+
+      console.log(`Scan completed. Cloudflare: ${this.results.cloudflare.length}, Proxy: ${this.results.proxyIPs.length}`);
+      
+      // 保存结果
+      await this.saveResults();
+
+    } catch (error) {
+      console.error('Scan error:', error);
+    } finally {
+      this.isScanning = false;
+    }
+  }
+
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // 保存结果到文件
+  async saveResults() {
+    try {
+      const dataDir = path.join(__dirname, '../data');
+      await fs.mkdir(dataDir, { recursive: true });
+      await fs.writeFile(
+        path.join(dataDir, 'results.json'),
+        JSON.stringify(this.results, null, 2)
+      );
+      console.log('Results saved successfully');
+    } catch (error) {
+      console.error('Failed to save results:', error);
+    }
+  }
+
+  // 加载结果
+  async loadResults() {
+    try {
+      const dataPath = path.join(__dirname, '../data/results.json');
+      const data = await fs.readFile(dataPath, 'utf8');
+      this.results = JSON.parse(data);
+      console.log('Previous results loaded');
+    } catch (error) {
+      console.log('No previous results found, will perform initial scan');
+    }
+  }
+
+  getResults() {
+    return this.results;
+  }
+
+  getScanStatus() {
+    return {
+      isScanning: this.isScanning,
+      lastUpdate: this.results.lastUpdate
+    };
+  }
+}
+
+module.exports = IPScanner;
