@@ -1,4 +1,4 @@
-const ping = require('ping');
+const { spawn } = require('child_process');
 const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
@@ -12,296 +12,288 @@ class IPScanner {
     };
     this.isScanning = false;
 
-    // 更新的Cloudflare IP段 (2024年最新)
-    this.cloudflareRanges = [
-      '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
-      '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
-      '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
-      '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22', '2400:cb00::/32',
-      '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32'
+    // 基于 XIU2/CloudflareSpeedTest 的 Cloudflare IP 段
+    this.cloudflareCIDRs = [
+      '173.245.48.0/20',
+      '103.21.244.0/22',
+      '103.22.200.0/22',
+      '103.31.4.0/22',
+      '141.101.64.0/18',
+      '108.162.192.0/18',
+      '190.93.240.0/20',
+      '188.114.96.0/20',
+      '197.234.240.0/22',
+      '198.41.128.0/17',
+      '162.158.0.0/15',
+      '104.16.0.0/13',
+      '104.24.0.0/14',
+      '172.64.0.0/13',
+      '131.0.72.0/22'
     ];
 
     // 美国主要云服务商IP段
-    this.proxyRanges = {
-      aws: [
-        '3.0.0.0/8', '13.32.0.0/15', '13.35.0.0/16', '18.144.0.0/12',
-        '52.0.0.0/11', '54.0.0.0/8', '34.192.0.0/12', '35.153.0.0/16'
-      ],
-      google: [
-        '34.64.0.0/10', '35.184.0.0/13', '35.192.0.0/14', '35.196.0.0/15',
-        '35.224.0.0/12', '104.154.0.0/15', '130.211.0.0/16', '146.148.0.0/17'
-      ],
-      azure: [
-        '13.64.0.0/11', '20.0.0.0/8', '40.64.0.0/10', '52.224.0.0/11',
-        '104.40.0.0/13', '168.61.0.0/16', '191.232.0.0/13'
-      ],
-      digitalocean: [
-        '104.131.0.0/16', '159.203.0.0/16', '68.183.0.0/16', '167.99.0.0/16',
-        '134.209.0.0/16', '165.227.0.0/16', '138.197.0.0/16', '174.138.0.0/16'
-      ]
-    };
+    this.proxyCIDRs = [
+      // Google Cloud US
+      '34.64.0.0/10',
+      '35.184.0.0/13',
+      '104.196.0.0/14',
+      // AWS US
+      '52.0.0.0/11',
+      '54.64.0.0/11',
+      '3.208.0.0/12',
+      // Azure US
+      '20.36.0.0/13',
+      '40.64.0.0/10',
+      '52.224.0.0/11',
+      // DigitalOcean
+      '134.209.0.0/16',
+      '159.203.0.0/16',
+      '68.183.0.0/16'
+    ];
   }
 
-  ipToInt(ip) {
-    return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
-  }
-
-  intToIp(int) {
-    return [(int >>> 24) & 255, (int >>> 16) & 255, (int >>> 8) & 255, int & 255].join('.');
-  }
-
-  cidrToIpList(cidr, count = 5) {
-    const [network, prefixStr] = cidr.split('/');
-    const prefix = parseInt(prefixStr);
-    
-    if (isNaN(prefix) || prefix < 0 || prefix > 32) return [];
-    
+  // 基于 XIU2 方法：从 CIDR 生成随机 IP
+  generateIPsFromCIDR(cidr, count = 10) {
+    const [network, prefixLength] = cidr.split('/');
+    const prefix = parseInt(prefixLength);
     const hostBits = 32 - prefix;
-    const networkInt = this.ipToInt(network);
-    const maxHosts = Math.pow(2, hostBits);
+    const maxHosts = Math.pow(2, hostBits) - 2; // 减去网络地址和广播地址
+    
+    const networkParts = network.split('.').map(Number);
     const ips = new Set();
     
-    // 生成随机IP
-    for (let i = 0; i < Math.min(count, maxHosts); i++) {
-      let offset = Math.floor(Math.random() * maxHosts);
-      let attempts = 0;
+    for (let i = 0; i < count * 3 && ips.size < count; i++) {
+      // 生成随机主机号（避开网络地址和广播地址）
+      const hostNum = Math.floor(Math.random() * maxHosts) + 1;
       
-      while (ips.has(this.intToIp(networkInt + offset)) && attempts < 10) {
-        offset = Math.floor(Math.random() * maxHosts);
-        attempts++;
+      // 计算IP地址
+      let ip = [...networkParts];
+      let remaining = hostNum;
+      
+      for (let j = 3; j >= 0; j--) {
+        const byteBits = Math.min(8, Math.max(0, hostBits - (3 - j) * 8));
+        if (byteBits > 0) {
+          const byteMax = Math.pow(2, byteBits) - 1;
+          const byteValue = remaining & byteMax;
+          ip[j] = (ip[j] & (255 - byteMax)) | byteValue;
+          remaining = remaining >> byteBits;
+        }
       }
       
-      if (attempts < 10) {
-        ips.add(this.intToIp(networkInt + offset));
-      }
+      ips.add(ip.join('.'));
     }
     
     return Array.from(ips);
   }
 
-  generateIpList(ranges, totalCount, ipsPerRange = 3) {
-    const allIps = [];
-    
-    for (const cidr of ranges) {
-      if (cidr.includes(':')) continue; // 跳过IPv6
-      const rangeIps = this.cidrToIpList(cidr, ipsPerRange);
-      allIps.push(...rangeIps);
-    }
-    
-    return allIps.sort(() => Math.random() - 0.5).slice(0, totalCount);
-  }
-
-  async testLatency(host) {
+  // 基于 XIU2 方法：下载测试
+  async downloadSpeedTest(ip, testUrl = '/cdn-cgi/trace') {
     try {
-      const result = await ping.promise.probe(host, {
-        timeout: 3,
-        extra: ['-c', '2']
-      });
-      return {
-        alive: result.alive,
-        time: result.time === 'unknown' ? 999 : parseFloat(result.time) || 999,
-        packetLoss: result.packetLoss || '0%'
-      };
-    } catch (error) {
-      return { alive: false, time: 999, packetLoss: '100%' };
-    }
-  }
-
-  // 验证是否为真实的Cloudflare IP
-  async verifyCloudflareIP(ip) {
-    try {
-      // 方法1: 检查HTTP响应头
-      const response = await axios.get(`http://${ip}`, {
-        timeout: 5000,
-        maxRedirects: 0,
-        validateStatus: () => true,
+      const startTime = Date.now();
+      const response = await axios.get(`http://${ip}${testUrl}`, {
+        timeout: 10000,
+        responseType: 'text',
         headers: {
-          'Host': 'www.cloudflare.com',
-          'User-Agent': 'Mozilla/5.0 (compatible; CFScanner/1.0)'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
       });
-
-      const cfHeaders = [
-        'cf-ray', 'cf-cache-status', 'cf-request-id', 
-        'server', 'cf-bgj', 'cf-polished'
-      ];
       
-      const hasCfHeaders = cfHeaders.some(header => 
-        response.headers[header] || 
-        (response.headers.server && response.headers.server.toLowerCase().includes('cloudflare'))
-      );
+      const endTime = Date.now();
+      const duration = endTime - startTime;
+      const dataSize = response.data.length;
+      const speed = dataSize / (duration / 1000); // bytes per second
+      
+      return {
+        success: true,
+        latency: duration,
+        speed: speed,
+        dataSize: dataSize,
+        httpStatus: response.status
+      };
+    } catch (error) {
+      return {
+        success: false,
+        latency: 9999,
+        speed: 0,
+        error: error.message
+      };
+    }
+  }
 
-      if (hasCfHeaders) return true;
-
-      // 方法2: 尝试访问Cloudflare特有的端点
-      const testResponse = await axios.get(`http://${ip}/cdn-cgi/trace`, {
-        timeout: 3000,
-        validateStatus: () => true
+  // 基于 XIU2 方法：TCP 连接测试
+  async tcpConnectTest(ip, port = 80) {
+    return new Promise((resolve) => {
+      const net = require('net');
+      const socket = new net.Socket();
+      const startTime = Date.now();
+      
+      socket.setTimeout(5000);
+      
+      socket.connect(port, ip, () => {
+        const latency = Date.now() - startTime;
+        socket.destroy();
+        resolve({ success: true, latency });
       });
+      
+      socket.on('error', () => {
+        socket.destroy();
+        resolve({ success: false, latency: 9999 });
+      });
+      
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve({ success: false, latency: 9999 });
+      });
+    });
+  }
 
-      return testResponse.status === 200 && 
-             testResponse.data && 
-             testResponse.data.includes('fl=');
-
+  // 验证 Cloudflare IP（基于 XIU2 的方法）
+  async verifyCloudflareIP(ip) {
+    try {
+      // 测试 Cloudflare 特有的 cdn-cgi/trace
+      const response = await axios.get(`http://${ip}/cdn-cgi/trace`, {
+        timeout: 8000,
+        headers: {
+          'User-Agent': 'CloudflareSpeedTest/1.0'
+        }
+      });
+      
+      if (response.status === 200 && response.data) {
+        const trace = response.data.toString();
+        // 检查 Cloudflare 特征
+        return trace.includes('fl=') && 
+               trace.includes('colo=') && 
+               trace.includes('ip=');
+      }
+      
+      return false;
     } catch (error) {
       return false;
     }
   }
 
-  // 验证代理IP的可用性
-  async verifyProxyIP(ip) {
+  // 获取地理位置信息
+  async getLocation(ip) {
     try {
-      // 测试多个常见端口和协议
-      const tests = [
-        this.testHttpProxy(ip, 80),
-        this.testHttpProxy(ip, 8080),
-        this.testHttpProxy(ip, 3128)
-      ];
-
-      const results = await Promise.allSettled(tests);
-      return results.some(result => result.status === 'fulfilled' && result.value);
-    } catch (error) {
-      return false;
-    }
-  }
-
-  async testHttpProxy(ip, port) {
-    try {
-      const response = await axios.get('http://httpbin.org/ip', {
-        proxy: {
-          host: ip,
-          port: port
-        },
+      const response = await axios.get(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,isp,org,lat,lon`, {
         timeout: 5000
       });
       
-      return response.status === 200 && response.data.origin !== ip;
-    } catch (error) {
-      // 如果不是代理，尝试直接HTTP连接
-      try {
-        const directResponse = await axios.get(`http://${ip}:${port}`, {
-          timeout: 3000,
-          validateStatus: () => true
-        });
-        return directResponse.status >= 200 && directResponse.status < 500;
-      } catch (directError) {
-        return false;
-      }
-    }
-  }
-
-  async getLocation(ip) {
-    try {
-      // 使用多个IP地理位置服务
-      const services = [
-        `http://ip-api.com/json/${ip}?fields=status,country,regionName,city,isp,org`,
-        `https://ipapi.co/${ip}/json/`
-      ];
-
-      for (const service of services) {
-        try {
-          const response = await axios.get(service, { timeout: 3000 });
-          
-          if (service.includes('ip-api.com')) {
-            if (response.data.status === 'success') {
-              return {
-                country: response.data.country || 'Unknown',
-                region: response.data.regionName || 'Unknown',
-                city: response.data.city || 'Unknown',
-                isp: response.data.isp || response.data.org || 'Unknown'
-              };
-            }
-          } else if (service.includes('ipapi.co')) {
-            if (!response.data.error) {
-              return {
-                country: response.data.country_name || 'Unknown',
-                region: response.data.region || 'Unknown',
-                city: response.data.city || 'Unknown',
-                isp: response.data.org || 'Unknown'
-              };
-            }
-          }
-        } catch (serviceError) {
-          continue;
-        }
+      if (response.data.status === 'success') {
+        return {
+          country: response.data.country || 'Unknown',
+          region: response.data.regionName || 'Unknown', 
+          city: response.data.city || 'Unknown',
+          isp: response.data.isp || response.data.org || 'Unknown',
+          lat: response.data.lat || 0,
+          lon: response.data.lon || 0
+        };
       }
     } catch (error) {
-      console.log(`Location lookup failed for ${ip}`);
+      console.log(`获取 ${ip} 地理位置失败:`, error.message);
     }
     
-    return { country: 'Unknown', region: 'Unknown', city: 'Unknown', isp: 'Unknown' };
+    return { 
+      country: 'Unknown', 
+      region: 'Unknown', 
+      city: 'Unknown', 
+      isp: 'Unknown',
+      lat: 0,
+      lon: 0
+    };
   }
 
+  // 扫描单个 Cloudflare IP（基于 XIU2 方法）
   async scanCloudflareIP(ip) {
-    console.log(`[CF] Scanning IP: ${ip}`);
+    console.log(`[CF] 测试 IP: ${ip}`);
     
-    const latencyResult = await this.testLatency(ip);
-    if (!latencyResult.alive || latencyResult.time > 500) {
+    // 1. TCP 连接测试
+    const tcpResult = await this.tcpConnectTest(ip, 80);
+    if (!tcpResult.success || tcpResult.latency > 800) {
+      console.log(`✗ [CF] ${ip} TCP连接失败 (${tcpResult.latency}ms)`);
       return null;
     }
-
-    // 验证是否为真实的Cloudflare IP
+    
+    // 2. Cloudflare 验证
     const isCloudflare = await this.verifyCloudflareIP(ip);
     if (!isCloudflare) {
-      console.log(`✗ IP ${ip} is not a valid Cloudflare IP`);
+      console.log(`✗ [CF] ${ip} 不是有效的 Cloudflare IP`);
       return null;
     }
-
+    
+    // 3. 下载速度测试
+    const speedResult = await this.downloadSpeedTest(ip);
+    if (!speedResult.success) {
+      console.log(`✗ [CF] ${ip} 下载测试失败`);
+      return null;
+    }
+    
+    console.log(`✓ [CF] ${ip} 测试成功 - 延迟: ${speedResult.latency}ms, 速度: ${(speedResult.speed/1024).toFixed(2)} KB/s`);
+    
+    // 4. 获取地理位置
     const location = await this.getLocation(ip);
     
     return {
       ip,
       type: 'cloudflare',
-      latency: latencyResult.time,
-      alive: latencyResult.alive,
-      packetLoss: latencyResult.packetLoss,
-      responseTime: latencyResult.time,
-      speed: latencyResult.time < 100 ? 'Fast' : latencyResult.time < 300 ? 'Medium' : 'Slow',
-      httpStatus: 200,
+      latency: speedResult.latency,
+      speed: speedResult.speed,
+      speedKBps: Math.round(speedResult.speed / 1024),
+      tcpLatency: tcpResult.latency,
+      httpStatus: speedResult.httpStatus,
+      dataSize: speedResult.dataSize,
+      alive: true,
       location,
       lastTest: new Date().toISOString()
     };
   }
 
+  // 扫描代理 IP
   async scanProxyIP(ip) {
-    console.log(`[PROXY] Scanning IP: ${ip}`);
+    console.log(`[PROXY] 测试 IP: ${ip}`);
     
-    const latencyResult = await this.testLatency(ip);
-    if (!latencyResult.alive || latencyResult.time > 800) {
+    // TCP 连接测试
+    const tcpResult = await this.tcpConnectTest(ip, 80);
+    if (!tcpResult.success || tcpResult.latency > 1000) {
+      console.log(`✗ [PROXY] ${ip} TCP连接失败 (${tcpResult.latency}ms)`);
       return null;
     }
-
-    // 验证代理功能
-    const isValidProxy = await this.verifyProxyIP(ip);
-    if (!isValidProxy) {
-      console.log(`✗ IP ${ip} is not a valid proxy`);
-      return null;
-    }
-
-    const location = await this.getLocation(ip);
     
-    // 确保是美国IP
-    if (!location.country || !location.country.toLowerCase().includes('united states') && 
-        !location.country.toLowerCase().includes('usa') && 
-        !location.country.toLowerCase().includes('us')) {
-      console.log(`✗ IP ${ip} is not in the US: ${location.country}`);
-      return null;
+    // HTTP 连通性测试
+    try {
+      const startTime = Date.now();
+      const response = await axios.get(`http://${ip}`, {
+        timeout: 8000,
+        validateStatus: () => true,
+        maxRedirects: 0
+      });
+      
+      const httpLatency = Date.now() - startTime;
+      
+      if (response.status >= 200 && response.status < 500) {
+        console.log(`✓ [PROXY] ${ip} 测试成功 - TCP: ${tcpResult.latency}ms, HTTP: ${httpLatency}ms`);
+        
+        const location = await this.getLocation(ip);
+        
+        return {
+          ip,
+          type: 'proxy',
+          latency: httpLatency,
+          tcpLatency: tcpResult.latency,
+          httpStatus: response.status,
+          alive: true,
+          location,
+          lastTest: new Date().toISOString()
+        };
+      }
+    } catch (error) {
+      console.log(`✗ [PROXY] ${ip} HTTP测试失败: ${error.message}`);
     }
-
-    return {
-      ip,
-      type: 'proxy',
-      latency: latencyResult.time,
-      alive: latencyResult.alive,
-      packetLoss: latencyResult.packetLoss,
-      responseTime: latencyResult.time,
-      speed: latencyResult.time < 150 ? 'Fast' : latencyResult.time < 400 ? 'Medium' : 'Slow',
-      httpStatus: 200,
-      location,
-      lastTest: new Date().toISOString()
-    };
+    
+    return null;
   }
 
+  // 执行扫描（基于 XIU2 的批量测试方法）
   async performScan(options = {}) {
     if (this.isScanning) {
       console.log('扫描已在进行中...');
@@ -309,120 +301,89 @@ class IPScanner {
     }
 
     this.isScanning = true;
-    console.log('开始真实IP扫描...');
+    console.log('开始基于 XIU2/CloudflareSpeedTest 方法的扫描...');
 
     const {
       cloudflareScanCount = 50,
-      proxyScanCount = 80,
-      ipsPerRange = 3,
-      scanDelay = 100
+      proxyScanCount = 30,
+      ipsPerCidr = 5,
+      concurrency = 5
     } = options;
 
     try {
-      // 生成IP列表
-      console.log('生成Cloudflare IP列表...');
-      const cfIps = this.generateIpList(this.cloudflareRanges, cloudflareScanCount, ipsPerRange);
+      // 生成 Cloudflare IP
+      console.log('从 Cloudflare CIDR 生成测试 IP...');
+      const cfIPs = [];
+      for (const cidr of this.cloudflareCIDRs) {
+        cfIPs.push(...this.generateIPsFromCIDR(cidr, ipsPerCidr));
+      }
+      const cloudflareIPs = cfIPs.slice(0, cloudflareScanCount);
       
-      console.log('生成代理IP列表...');
-      const proxyIps = [];
-      Object.values(this.proxyRanges).forEach(ranges => {
-        proxyIps.push(...this.generateIpList(ranges, proxyScanCount / 4, ipsPerRange));
-      });
+      // 生成代理 IP
+      console.log('从代理服务商 CIDR 生成测试 IP...');
+      const proxyIPs = [];
+      for (const cidr of this.proxyCIDRs) {
+        proxyIPs.push(...this.generateIPsFromCIDR(cidr, ipsPerCidr));
+      }
+      const testProxyIPs = proxyIPs.slice(0, proxyScanCount);
 
       const cloudflareResults = [];
       const proxyResults = [];
 
-      // 扫描Cloudflare IP
-      console.log(`开始扫描 ${cfIps.length} 个Cloudflare IP...`);
-      for (const ip of cfIps) {
-        const result = await this.scanCloudflareIP(ip);
-        if (result) {
-          cloudflareResults.push(result);
-          console.log(`✓ 找到有效Cloudflare IP: ${ip} (${result.latency}ms)`);
+      // 批量测试 Cloudflare IP
+      console.log(`开始测试 ${cloudflareIPs.length} 个 Cloudflare IP...`);
+      for (let i = 0; i < cloudflareIPs.length; i += concurrency) {
+        const batch = cloudflareIPs.slice(i, i + concurrency);
+        const batchPromises = batch.map(ip => this.scanCloudflareIP(ip));
+        const batchResults = await Promise.all(batchPromises);
+        
+        for (const result of batchResults) {
+          if (result) {
+            cloudflareResults.push(result);
+          }
         }
-        await this.delay(scanDelay);
+        
+        // 避免过于频繁的请求
+        await this.delay(500);
       }
 
-      // 扫描代理IP
-      console.log(`开始扫描 ${proxyIps.length} 个代理IP...`);
-      for (const ip of proxyIps) {
-        const result = await this.scanProxyIP(ip);
-        if (result) {
-          proxyResults.push(result);
-          console.log(`✓ 找到有效代理IP: ${ip} (${result.latency}ms)`);
+      // 批量测试代理 IP
+      console.log(`开始测试 ${testProxyIPs.length} 个代理 IP...`);
+      for (let i = 0; i < testProxyIPs.length; i += concurrency) {
+        const batch = testProxyIPs.slice(i, i + concurrency);
+        const batchPromises = batch.map(ip => this.scanProxyIP(ip));
+        const batchResults = await Promise.all(batchPromises);
+        
+        for (const result of batchResults) {
+          if (result) {
+            proxyResults.push(result);
+          }
         }
-        await this.delay(scanDelay);
+        
+        await this.delay(500);
       }
 
-      // 添加一些已知的稳定IP作为备用
-      this.addKnownStableIPs(cloudflareResults, proxyResults);
-
-      // 排序并保存结果
+      // 排序结果
       this.results = {
         cloudflare: cloudflareResults
           .sort((a, b) => a.latency - b.latency)
-          .slice(0, 20),
+          .slice(0, 30),
         proxyIPs: proxyResults
           .sort((a, b) => a.latency - b.latency)
           .slice(0, 20),
         lastUpdate: new Date().toISOString()
       };
 
-      console.log(`扫描完成。有效IP: Cloudflare: ${this.results.cloudflare.length}, 代理: ${this.results.proxyIPs.length}`);
+      console.log(`扫描完成！`);
+      console.log(`Cloudflare: ${this.results.cloudflare.length} 个有效IP`);
+      console.log(`代理: ${this.results.proxyIPs.length} 个有效IP`);
+      
       await this.saveResults();
 
     } catch (error) {
-      console.error('扫描过程中发生错误:', error);
+      console.error('扫描出错:', error);
     } finally {
       this.isScanning = false;
-    }
-  }
-
-  addKnownStableIPs(cloudflareResults, proxyResults) {
-    // 添加一些已知稳定的Cloudflare IP
-    const knownCfIPs = [
-      '104.16.132.229', '104.16.133.229', '104.16.134.229',
-      '172.67.74.226', '172.67.75.226', '104.21.48.84'
-    ];
-
-    // 添加一些已知的美国代理IP
-    const knownProxyIPs = [
-      '34.102.136.180', '35.247.4.238', '52.86.28.22'
-    ];
-
-    // 只添加不在当前结果中的IP
-    for (const ip of knownCfIPs) {
-      if (!cloudflareResults.some(r => r.ip === ip) && cloudflareResults.length < 10) {
-        cloudflareResults.push({
-          ip,
-          type: 'cloudflare-known',
-          latency: 80,
-          alive: true,
-          packetLoss: '0%',
-          responseTime: 80,
-          speed: 'Fast',
-          httpStatus: 200,
-          location: { country: 'USA', region: 'California', city: 'San Francisco', isp: 'Cloudflare' },
-          lastTest: new Date().toISOString()
-        });
-      }
-    }
-
-    for (const ip of knownProxyIPs) {
-      if (!proxyResults.some(r => r.ip === ip) && proxyResults.length < 5) {
-        proxyResults.push({
-          ip,
-          type: 'proxy-known',
-          latency: 120,
-          alive: true,
-          packetLoss: '0%',
-          responseTime: 120,
-          speed: 'Medium',
-          httpStatus: 200,
-          location: { country: 'United States', region: 'Oregon', city: 'The Dalles', isp: 'Google Cloud' },
-          lastTest: new Date().toISOString()
-        });
-      }
     }
   }
 
@@ -439,7 +400,7 @@ class IPScanner {
         path.join(dataDir, 'results.json'),
         JSON.stringify(this.results, null, 2)
       );
-      console.log('结果已保存');
+      console.log(`结果已保存: Cloudflare ${this.results.cloudflare.length} 个, 代理 ${this.results.proxyIPs.length} 个`);
     } catch (error) {
       console.error('保存结果失败:', error);
     }
@@ -449,17 +410,23 @@ class IPScanner {
     try {
       const dataPath = path.join(__dirname, '../data/results.json');
       const data = await fs.readFile(dataPath, 'utf8');
+      
+      if (!data.trim()) {
+        console.log('结果文件为空，将执行初始扫描');
+        return;
+      }
+      
       const parsedData = JSON.parse(data);
       
       if (parsedData && parsedData.cloudflare && parsedData.proxyIPs) {
         this.results = parsedData;
-        console.log('已加载之前的扫描结果');
+        console.log(`已加载结果: Cloudflare ${this.results.cloudflare.length} 个, 代理 ${this.results.proxyIPs.length} 个`);
       }
     } catch (error) {
       if (error.code === 'ENOENT') {
-        console.log('未找到之前的结果，将执行初始扫描');
+        console.log('未找到结果文件，将执行初始扫描');
       } else {
-        console.error('加载结果失败:', error);
+        console.log('加载结果出错，将重新扫描:', error.message);
       }
     }
   }
