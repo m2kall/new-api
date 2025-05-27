@@ -2,8 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
 const path = require('path');
-// 确保这里的路径指向你更新后的 IPScanner 类文件
-const IPScanner = require('./services/scanner.js'); 
+const IPScanner = require('./services/scanner');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
