@@ -82,15 +82,10 @@ class CloudflareIPApp {
             <div class="ip-card">
                 <div class="ip-header">
                     <span class="ip-address">${ip.ip}</span>
-                    <span class="latency ${this.getLatencyClass(ip.latency)}">${ip.latency}ms</span>
                 </div>
                 <div class="ip-details">
                     <div class="detail-item">
-                        <span class="detail-label">网络速度:</span>
-                        <span class="detail-value">${ip.speed}</span>
-                    </div>
-                    <div class="detail-item">
-                        <span class="detail-label">响应时间:</span>
+                        <span class="detail-label">延迟 (HTTP):</span>
                         <span class="detail-value">${ip.responseTime}ms</span>
                     </div>
                     <div class="detail-item">
@@ -99,7 +94,7 @@ class CloudflareIPApp {
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">状态:</span>
-                        <span class="detail-value">${ip.alive ? '在线' : '离线'}</span>
+                        <span class="detail-value">${ip.alive && ip.httpStatus >= 200 && ip.httpStatus < 300 ? '在线' : '离线'}</span>
                     </div>
                 </div>
                 <div class="location">

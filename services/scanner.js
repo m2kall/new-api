@@ -76,7 +76,7 @@ class IPScanner {
     return [(int >>> 24) & 255, (int >>> 16) & 255, (int >>> 8) & 255, int & 255].join('.');
   }
 
-  cidrToIpList(cidr, maxIps = 5) { // 每个CIDR默认取5个IP
+  cidrToIpList(cidr, numIps = 5) { // 每个CIDR尝试取的IP数
     const [network, prefixLengthStr] = cidr.split('/');
     const prefix = parseInt(prefixLengthStr);
 
@@ -87,27 +87,39 @@ class IPScanner {
 
     const hostBits = 32 - prefix;
     const networkInt = this.ipToInt(network);
-    const ips = [];
+    const ips = new Set(); // 使用Set去重
+    const totalPossibleIps = Math.pow(2, hostBits);
 
-    // /32: 1 IP (自身)
-    // /31: 2 IPs
-    // /30: 4 IPs (通常网络和广播不分配，但云提供商可能全部分配)
-    // 我们将生成从网络地址开始的IP
-    const numPossibleIps = Math.pow(2, hostBits);
-    
-    // 尝试随机选择起始点，以增加多样性，但要确保在范围内
-    let startOffset = 0;
-    if (numPossibleIps > maxIps) {
-      // 如果CIDR范围远大于我们想取的IP数，随机选一个起始
-      startOffset = Math.floor(Math.random() * (numPossibleIps - maxIps));
+    // 尝试选取不同位置的IP
+    const positionsToTry = Math.min(numIps, totalPossibleIps);
+    for (let i = 0; i < positionsToTry; i++) {
+        let offset;
+        if (totalPossibleIps <= numIps) {
+            offset = i; // 如果总IP数不多于numIps，直接顺序取
+        } else {
+            // 否则，尝试在范围内均匀或随机选取
+            // 这里简单尝试在开头、中间、结尾附近选取，并加入一些随机性
+            if (i === 0) offset = 0; // 开头
+            else if (i === positionsToTry - 1) offset = totalPossibleIps - 1; // 结尾
+            else {
+                 // 在中间随机选取
+                 offset = Math.floor(Math.random() * totalPossibleIps);
+            }
+             // 确保offset在有效范围内且不重复
+             let attempts = 0;
+             while (ips.has(this.intToIp(networkInt + offset)) && attempts < 10) {
+                 offset = Math.floor(Math.random() * totalPossibleIps);
+                 attempts++;
+             }
+             if (attempts === 10) continue; // 尝试多次未能找到新IP，跳过
+        }
+
+        if (networkInt + offset >= 0 && networkInt + offset < networkInt + totalPossibleIps) { // 添加边界检查
+             ips.add(this.intToIp(networkInt + offset));
+        }
     }
 
-    for (let i = 0; i < Math.min(numPossibleIps, maxIps); i++) {
-      const currentOffset = startOffset + i;
-      if (networkInt + currentOffset >= networkInt + numPossibleIps) break; // 防止超出范围
-      ips.push(this.intToIp(networkInt + currentOffset));
-    }
-    return ips;
+    return Array.from(ips);
   }
 
   generateIpListFromRanges(providerKeys, totalIpsToGenerate, ipsPerCidr = 3) {
@@ -122,20 +134,15 @@ class IPScanner {
 
     if (selectedRanges.length === 0) return [];
 
-    // 如果总 IP 数较少，优先从每个 CIDR 取少量 IP
-    // 如果总 IP 数较多，则可能需要从某些 CIDR 取更多 IP 或循环
-    const ipsToAttemptPerCidr = Math.max(1, Math.ceil(ipsPerCidr)); // 确保每个 CIDR 至少尝试取一个
-
+    // 从每个CIDR获取指定数量的IP
     for (const cidr of selectedRanges) {
-      if (allIps.length >= totalIpsToGenerate) break;
-      const rangeIps = this.cidrToIpList(cidr, ipsToAttemptPerCidr);
+      const rangeIps = this.cidrToIpList(cidr, ipsPerCidr);
       allIps.push(...rangeIps);
     }
-    
+
     // 打乱并截取到目标数量
     return allIps.sort(() => Math.random() - 0.5).slice(0, totalIpsToGenerate);
   }
-
 
   // --- 核心扫描逻辑 (与你之前代码类似) ---
   async testLatency(host) {
@@ -231,7 +238,6 @@ class IPScanner {
         return null;
     }
 
-
     const location = await this.getLocation(ip);
     
     return {
@@ -258,72 +264,115 @@ class IPScanner {
     }
 
     this.isScanning = true;
-    console.log('开始从IP池进行全面扫描...');
+    console.log('开始从 IP 段生成 IP 并进行分阶段扫描...');
 
     const {
-        cloudflareScanCount = 50, // 扫描多少个Cloudflare IP
-        proxyScanCount = 60,      // 扫描多少个其他代理IP
-        ipsPerCidrForCloudflare = 3, // 每个Cloudflare CIDR中取多少IP
-        ipsPerCidrForProxy = 1,   // 每个其他代理CIDR中取多少IP
+        cloudflareScanCount = 100, // 从 Cloudflare CIDRs 生成并初步测试的IP总数 (增加数量)
+        proxyScanCount = 150,      // 从 Proxy CIDRs 生成并初步测试的IP总数 (增加数量)
+        ipsPerCidrForCloudflare = 5, // 每个Cloudflare CIDR尝试取的IP数 (增加数量)
+        ipsPerCidrForProxy = 3,   // 每个其他代理CIDR尝试取的IP数 (增加数量)
         scanDelay = 50,           // 每个IP扫描之间的延迟（毫秒）
     } = options;
 
     try {
+      // 1. 从 CIDR 生成 IP 列表
+      console.log(`从 Cloudflare CIDRs 生成 ${cloudflareScanCount} 个 IP...`);
+      const cfIpsToScanRaw = this.generateIpListFromRanges(['cloudflare_us'], cloudflareScanCount, ipsPerCidrForCloudflare);
+      console.log(`从 Proxy CIDRs 生成 ${proxyScanCount} 个 IP...`);
+      const proxyIpsToScanRaw = this.generateIpListFromRanges(this.proxyProviders, proxyScanCount, ipsPerCidrForProxy);
+
+      const cloudflarePingSuccess = [];
+      const proxyPingSuccess = [];
+
+      // 2. 第一阶段扫描: Ping 测试
+      console.log('第一阶段扫描: 进行 Ping 测试...');
+      for (const ip of cfIpsToScanRaw) {
+          const latencyResult = await this.testLatency(ip);
+          if (latencyResult.alive) {
+              cloudflarePingSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'cloudflare' });
+              console.log(`✓ [CF Ping] IP ${ip} Ping 成功 (${latencyResult.time}ms)`);
+          } else {
+              console.log(`✗ [CF Ping] IP ${ip} Ping 失败`);
+          }
+          await this.delay(scanDelay / 2); // Ping 阶段可以稍微快一点
+      }
+
+      for (const ip of proxyIpsToScanRaw) {
+          const latencyResult = await this.testLatency(ip);
+           if (latencyResult.alive) {
+              proxyPingSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'proxy' });
+              console.log(`✓ [PROXY Ping] IP ${ip} Ping 成功 (${latencyResult.time}ms)`);
+          } else {
+              console.log(`✗ [PROXY Ping] IP ${ip} Ping 失败`);
+          }
+          await this.delay(scanDelay / 2);
+      }
+
+      console.log(`Ping 测试完成。Cloudflare Ping 成功: ${cloudflarePingSuccess.length}, 代理 Ping 成功: ${proxyPingSuccess.length}`);
+
       const cloudflareResults = [];
       const proxyResults = [];
 
-      // 1. 生成并扫描 Cloudflare IP
-      console.log(`准备扫描 ${cloudflareScanCount} 个 Cloudflare IP...`);
-      const cfIpsToScan = this.generateIpListFromRanges(['cloudflare_us'], cloudflareScanCount, ipsPerCidrForCloudflare);
-      console.log(`将从 Cloudflare IP 池中扫描 ${cfIpsToScan.length} 个 IP。`);
-
-      for (const ip of cfIpsToScan) {
-        const result = await this.scanIP(ip, 'cloudflare');
-        if (result && (result.alive || (result.httpStatus >= 200 && result.httpStatus < 300))) {
-          cloudflareResults.push(result);
-          console.log(`✓ [CF] IP ${ip} 添加 (延迟: ${result.latency}ms, 响应: ${result.responseTime}ms, HTTP: ${result.httpStatus})`);
-        } else {
-          console.log(`✗ [CF] IP ${ip} 无有效响应或测试失败`);
-        }
-        await this.delay(scanDelay);
+      // 3. 第二阶段扫描: HTTP 测试和获取位置 (只对 Ping 成功的IP进行)
+      console.log('第二阶段扫描: 进行 HTTP 测试和获取位置...');
+      for (const ipInfo of cloudflarePingSuccess) {
+          const speedResult = await this.testSpeed(ipInfo.ip);
+          // 保留 Ping 成功 并且 HTTP 状态码为 2xx 的 IP
+          if (speedResult.status >= 200 && speedResult.status < 300) {
+               const location = await this.getLocation(ipInfo.ip);
+               cloudflareResults.push({
+                  ip: ipInfo.ip,
+                  type: ipInfo.type,
+                  latency: ipInfo.latency,
+                  alive: ipInfo.alive,
+                  packetLoss: ipInfo.packetLoss,
+                  speed: speedResult.speed,
+                  responseTime: speedResult.responseTime,
+                  httpStatus: speedResult.status,
+                  location: location,
+                  lastTest: new Date().toISOString()
+               });
+               console.log(`✓ [CF HTTP] IP ${ipInfo.ip} HTTP 成功 (${speedResult.status})`);
+          } else {
+              console.log(`✗ [CF HTTP] IP ${ipInfo.ip} HTTP 失败或非 2xx (${speedResult.status || 'Timeout'})`);
+          }
+          await this.delay(scanDelay);
       }
 
-      // 2. 生成并扫描 Proxy IPs (来自其他云服务商)
-      console.log(`准备扫描 ${proxyScanCount} 个代理 IP...`);
-      const proxyIpsToScan = this.generateIpListFromRanges(this.proxyProviders, proxyScanCount, ipsPerCidrForProxy);
-      console.log(`将从代理 IP 池中扫描 ${proxyIpsToScan.length} 个 IP。`);
-      
-      for (const ip of proxyIpsToScan) {
-        // 找出这个IP属于哪个provider (可选，用于更详细的日志或结果分类)
-        let providerOrigin = 'proxy';
-        for (const providerKey of this.proxyProviders) {
-            if (this.usIpRanges[providerKey].some(range => this.isIpInCidr(ip, range))) {
-                providerOrigin = providerKey;
-                break;
-            }
-        }
-
-        const result = await this.scanIP(ip, providerOrigin);
-        if (result && (result.alive || (result.httpStatus >= 200 && result.httpStatus < 300))) {
-          proxyResults.push(result);
-          console.log(`✓ [${providerOrigin.toUpperCase()}] IP ${ip} 添加 (延迟: ${result.latency}ms, 响应: ${result.responseTime}ms, HTTP: ${result.httpStatus})`);
-        } else {
-          console.log(`✗ [${providerOrigin.toUpperCase()}] IP ${ip} 无有效响应或测试失败`);
-        }
-        await this.delay(scanDelay);
+      for (const ipInfo of proxyPingSuccess) {
+           const speedResult = await this.testSpeed(ipInfo.ip);
+            if (speedResult.status >= 200 && speedResult.status < 300) {
+               const location = await this.getLocation(ipInfo.ip);
+               proxyResults.push({
+                  ip: ipInfo.ip,
+                  type: ipInfo.type,
+                  latency: ipInfo.latency,
+                  alive: ipInfo.alive,
+                  packetLoss: ipInfo.packetLoss,
+                  speed: speedResult.speed,
+                  responseTime: speedResult.responseTime,
+                  httpStatus: speedResult.status,
+                  location: location,
+                  lastTest: new Date().toISOString()
+               });
+               console.log(`✓ [PROXY HTTP] IP ${ipInfo.ip} HTTP 成功 (${speedResult.status})`);
+          } else {
+              console.log(`✗ [PROXY HTTP] IP ${ipInfo.ip} HTTP 失败或非 2xx (${speedResult.status || 'Timeout'})`);
+          }
+          await this.delay(scanDelay);
       }
-      
-      // Fallback 逻辑可以保留，以防扫描数量不足
+
+      // 如果扫描结果太少，添加少量硬编码备用数据
       this.addFallbackDataIfNeeded(cloudflareResults, proxyResults);
 
-
+      // 更新结果，保留最终测试成功的IP，按延迟+响应时间排序
       this.results = {
         cloudflare: cloudflareResults.sort((a, b) => (a.latency + a.responseTime) - (b.latency + b.responseTime)).slice(0, 25), // 综合排序，保留25个
         proxyIPs: proxyResults.sort((a, b) => (a.latency + a.responseTime) - (b.latency + b.responseTime)).slice(0, 25), // 综合排序，保留25个
         lastUpdate: new Date().toISOString()
       };
 
-      console.log(`扫描完成。Cloudflare 有效IP: ${this.results.cloudflare.length}, 代理有效IP: ${this.results.proxyIPs.length}`);
+      console.log(`扫描完成。最终有效IP: Cloudflare: ${this.results.cloudflare.length}, 代理: ${this.results.proxyIPs.length}`);
       await this.saveResults();
 
     } catch (error) {
@@ -351,61 +400,27 @@ class IPScanner {
   }
 
   addFallbackDataIfNeeded(cloudflareResults, proxyResults) {
-    // 如果扫描结果太少，添加更多默认数据 (与你之前的逻辑类似)
-    if (cloudflareResults.length < 5) {
-        console.log('Cloudflare 扫描结果不足，添加备用数据...');
+    // 如果扫描结果太少，添加少量硬编码备用数据
+    if (cloudflareResults.length < 3) { // 减少备用数量
+        console.log('Cloudflare 扫描结果不足，添加少量备用数据...');
         const fallbackCloudflare = [
-          {
-            ip: '104.16.1.1',
-            latency: 100,
-            alive: true,
-            packetLoss: '0%',
-            speed: 'Fast',
-            responseTime: 300,
-            location: { country: 'USA', region: 'California', city: 'San Francisco', isp: 'Cloudflare' },
-            lastTest: new Date().toISOString()
-          },
-          {
-            ip: '104.16.2.2',
-            latency: 110,
-            alive: true,
-            packetLoss: '0%',
-            speed: 'Fast',
-            responseTime: 320,
-            location: { country: 'USA', region: 'California', city: 'San Francisco', isp: 'Cloudflare' },
-            lastTest: new Date().toISOString()
-          },
-          {
-            ip: '104.16.3.3',
-            latency: 120,
-            alive: true,
-            packetLoss: '0%',
-            speed: 'Medium',
-            responseTime: 350,
-            location: { country: 'USA', region: 'California', city: 'San Francisco', isp: 'Cloudflare' },
-            lastTest: new Date().toISOString()
-          },
+          { ip: '104.16.1.1', latency: 100, alive: true, packetLoss: '0%', speed: 'Fast', responseTime: 300, httpStatus: 200, location: { country: 'USA', region: 'California', city: 'San Francisco', isp: 'Cloudflare' }, lastTest: new Date().toISOString(), type: 'cloudflare-fallback' },
         ];
-        cloudflareResults.push(...fallbackCloudflare);
+        cloudflareResults.push(...fallbackCloudflare.filter(item =>
+            !cloudflareResults.some(existing => existing.ip === item.ip)
+        ));
     }
 
-    if (proxyResults.length < 5) {
-        console.log('代理 IP 扫描结果不足，添加备用数据...');
+    if (proxyResults.length < 3) { // 减少备用数量
+        console.log('代理 IP 扫描结果不足，添加少量备用数据...');
         const fallbackProxy = [
-          {
-            ip: '34.102.136.180',
-            latency: 150,
-            alive: true,
-            packetLoss: '0%',
-            speed: 'Medium',
-            responseTime: 600,
-            location: { country: 'USA', region: 'Oregon', city: 'The Dalles', isp: 'Google Cloud' },
-            lastTest: new Date().toISOString()}
+          { ip: '34.102.136.180', latency: 150, alive: true, packetLoss: '0%', speed: 'Medium', responseTime: 600, httpStatus: 200, location: { country: 'USA', region: 'Oregon', city: 'The Dalles', isp: 'Google Cloud' }, lastTest: new Date().toISOString(), type: 'proxy-fallback' },
         ];
-        proxyResults.push(...fallbackProxy);
+         proxyResults.push(...fallbackProxy.filter(item =>
+            !proxyResults.some(existing => existing.ip === item.ip)
+        ));
     }
   }
-
 
   delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
