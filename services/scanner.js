@@ -240,16 +240,6 @@ class IPScanner {
             responseTime: 280,
             location: { country: 'Global', region: 'CDN', city: 'Cloudflare', isp: 'Cloudflare' },
             lastTest: new Date().toISOString()
-          },
-          {
-            ip: 'speed.cloudflare.com',
-            domain: 'speed.cloudflare.com',
-            latency: 95,
-            alive: true,
-            speed: 'Fast',
-            responseTime: 290,
-            location: { country: 'Global', region: 'CDN', city: 'Cloudflare', isp: 'Cloudflare' },
-            lastTest: new Date().toISOString()
           }
         ];
         cloudflareResults.push(...fallbackCloudflare);
@@ -269,36 +259,6 @@ class IPScanner {
             lastTest: new Date().toISOString()
           },
           {
-            ip: '8.8.8.8',
-            latency: 80,
-            alive: true,
-            packetLoss: '0%',
-            speed: 'Fast',
-            responseTime: 250,
-            location: { country: 'USA', region: 'California', city: 'Mountain View', isp: 'Google' },
-            lastTest: new Date().toISOString()
-          },
-          {
-            ip: '8.8.4.4',
-            latency: 85,
-            alive: true,
-            packetLoss: '0%',
-            speed: 'Fast',
-            responseTime: 260,
-            location: { country: 'USA', region: 'California', city: 'Mountain View', isp: 'Google' },
-            lastTest: new Date().toISOString()
-          },
-          {
-            ip: '1.1.1.1',
-            latency: 75,
-            alive: true,
-            packetLoss: '0%',
-            speed: 'Fast',
-            responseTime: 240,
-            location: { country: 'USA', region: 'California', city: 'San Francisco', isp: 'Cloudflare' },
-            lastTest: new Date().toISOString()
-          },
-          {
             ip: '208.67.222.222',
             latency: 130,
             alive: true,
@@ -306,6 +266,26 @@ class IPScanner {
             speed: 'Medium',
             responseTime: 450,
             location: { country: 'USA', region: 'California', city: 'San Francisco', isp: 'OpenDNS' },
+            lastTest: new Date().toISOString()
+          },
+          {
+            ip: '35.186.224.47',
+            latency: 155,
+            alive: true,
+            packetLoss: '0%',
+            speed: 'Medium',
+            responseTime: 580,
+            location: { country: 'USA', region: 'Iowa', city: 'Council Bluffs', isp: 'Google Cloud' },
+            lastTest: new Date().toISOString()
+          },
+          {
+            ip: '34.120.54.55',
+            latency: 160,
+            alive: true,
+            packetLoss: '0%',
+            speed: 'Medium',
+            responseTime: 620,
+            location: { country: 'USA', region: 'Virginia', city: 'Ashburn', isp: 'Google Cloud' },
             lastTest: new Date().toISOString()
           }
         ];
