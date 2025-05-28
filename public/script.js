@@ -86,19 +86,23 @@ class CloudflareIPApp {
                 <div class="ip-details">
                     <div class="detail-item">
                         <span class="detail-label">延迟 (HTTP):</span>
-                        <span class="detail-value">${ip.responseTime}ms</span>
+                        <span class="detail-value">${ip.responseTime !== undefined ? ip.responseTime : 'N/A'}ms</span>
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">丢包率:</span>
-                        <span class="detail-value">${ip.packetLoss}</span>
+                        <span class="detail-value">${ip.packetLoss !== undefined ? ip.packetLoss : 'N/A'}</span>
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">状态:</span>
                         <span class="detail-value">${ip.alive && ip.httpStatus >= 200 && ip.httpStatus < 300 ? '在线' : '离线'}</span>
                     </div>
+                    <div class="detail-item">
+                        <span class="detail-label">速度:</span>
+                        <span class="detail-value">${ip.speed !== undefined ? ip.speed : 'N/A'}</span>
+                    </div>
                 </div>
                 <div class="location">
-                    📍 ${ip.location.country} ${ip.location.region} ${ip.location.city} - ${ip.location.isp}
+                    📍 ${ip.location && ip.location.country ? ip.location.country : ''} ${ip.location && ip.location.region ? ip.location.region : ''} ${ip.location && ip.location.city ? ip.location.city : ''} - ${ip.location && ip.location.isp ? ip.location.isp : ''}
                 </div>
             </div>
         `).join('');

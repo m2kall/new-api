@@ -1,0 +1,32 @@
+name: Sync Cloud IP Ranges
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每天凌晨2点（UTC）自动运行
+  workflow_dispatch:      # 允许手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run sync_ip_ranges.js
+        run: node sync_ip_ranges.js
+
+      - name: Commit and push if changed
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add ip-ranges.json
+          git diff --cached --quiet || git commit -m 'chore: 自动同步最新IP段'
+          git push
