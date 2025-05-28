@@ -592,6 +592,26 @@ class IPScanner {
       lastUpdate: this.results.lastUpdate
     };
   }
+
+  // 根据 usIpRanges 和 provider 名称生成 IP 列表
+  generateIpListFromRanges(providers, totalCount = 100, ipsPerCidr = 3) {
+    // providers: ['cloudflare_us', 'aws_us', ...]
+    // usIpRanges: { cloudflare_us: [cidr1, cidr2, ...], ... }
+    const allCidrs = [];
+    for (const provider of providers) {
+      if (this.usIpRanges[provider]) {
+        allCidrs.push(...this.usIpRanges[provider]);
+      }
+    }
+    // 随机选取部分 CIDR，每个段生成 ipsPerCidr 个IP
+    const selectedCidrs = allCidrs.sort(() => 0.5 - Math.random()).slice(0, Math.ceil(totalCount / ipsPerCidr));
+    const ipList = [];
+    for (const cidr of selectedCidrs) {
+      ipList.push(...this.generateIPsFromCIDR(cidr, ipsPerCidr));
+    }
+    // 最终随机打乱，取前 totalCount 个
+    return ipList.sort(() => 0.5 - Math.random()).slice(0, totalCount);
+  }
 }
 
 module.exports = IPScanner;
