@@ -498,49 +498,102 @@ class IPScanner {
       // 1. 生成 IP 列表
       const cfIpsToScanRaw = this.generateIpListFromRanges(['cloudflare_us'], cloudflareScanCount, ipsPerCidrForCloudflare);
       const proxyIpsToScanRaw = this.generateIpListFromRanges(this.proxyProviders, proxyScanCount, ipsPerCidrForProxy);
+
+      console.log(`[SCAN_DEBUG] Generated ${cfIpsToScanRaw.length} Cloudflare IPs and ${proxyIpsToScanRaw.length} Proxy IPs.`);
+
       const cloudflarePingTcpSuccess = [];
       const proxyPingTcpSuccess = [];
+
       // 2. 第一阶段：Ping + TCP
+      console.log('[SCAN_DEBUG] Starting Ping + TCP phase...');
       for (const ip of cfIpsToScanRaw) {
           const latencyResult = await this.testLatency(ip);
           if (latencyResult.alive) {
+              console.log(`[SCAN_DEBUG] Ping successful for ${ip} (${latencyResult.time}ms, ${latencyResult.packetLoss}).`);
               // TCP 80 端口测试
               const tcpResult = await this.tcpConnectTest(ip, 80);
               if (tcpResult.success && tcpResult.latency < 1500) {
+                  console.log(`[SCAN_DEBUG] TCP successful for ${ip} (${tcpResult.latency}ms).`);
                   cloudflarePingTcpSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'cloudflare' });
+              } else {
+                  console.log(`[SCAN_DEBUG] TCP failed for ${ip}: ${tcpResult.latency}ms or connect failed.`);
               }
+          } else {
+              console.log(`[SCAN_DEBUG] Ping failed for ${ip} (${latencyResult.packetLoss}).`);
           }
           await this.delay(scanDelay / 2);
       }
+
+      console.log(`[SCAN_DEBUG] Ping + TCP phase completed. Cloudflare IPs passed: ${cloudflarePingTcpSuccess.length}.`);
+
       for (const ip of proxyIpsToScanRaw) {
           const latencyResult = await this.testLatency(ip);
           if (latencyResult.alive) {
+               console.log(`[SCAN_DEBUG] Ping successful for ${ip} (${latencyResult.time}ms, ${latencyResult.packetLoss}).`);
               // TCP 80 端口测试
               const tcpResult = await this.tcpConnectTest(ip, 80);
               if (tcpResult.success && tcpResult.latency < 1500) {
+                  console.log(`[SCAN_DEBUG] TCP successful for ${ip} (${tcpResult.latency}ms).`);
                   proxyPingTcpSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'proxy' });
+              } else {
+                   console.log(`[SCAN_DEBUG] TCP failed for ${ip}: ${tcpResult.latency}ms or connect failed.`);
               }
+          } else {
+               console.log(`[SCAN_DEBUG] Ping failed for ${ip} (${latencyResult.packetLoss}).`);
           }
           await this.delay(scanDelay / 2);
       }
+
+       console.log(`[SCAN_DEBUG] Ping + TCP phase completed. Proxy IPs passed: ${proxyPingTcpSuccess.length}.`);
+
       // 3. 第二阶段：HTTP 测试和获取位置（并发）
+       console.log('[SCAN_DEBUG] Starting HTTP phase...');
       const cloudflareResults = [];
       const proxyResults = [];
+
       // 并发任务
       const cfTasks = cloudflarePingTcpSuccess.map(ipInfo => async () => {
         const result = await this.scanIP(ipInfo.ip, ipInfo.type);
-        // 只允许 200-299
-        return result && result.httpStatus >= 200 && result.httpStatus < 300 ? result : null;
+        if (result) {
+             console.log(`[SCAN_DEBUG] HTTP test for ${ipInfo.ip}: Status ${result.httpStatus}, Latency ${result.responseTime}ms.`);
+             // 只允许 200-299
+             if (result.httpStatus >= 200 && result.httpStatus < 300) {
+                 return result;
+             } else {
+                 console.log(`[SCAN_DEBUG] HTTP status not 2xx for ${ipInfo.ip}: ${result.httpStatus}`);
+                 return null;
+             }
+        } else {
+             console.log(`[SCAN_DEBUG] HTTP test failed for ${ipInfo.ip}`);
+             return null;
+        }
       });
       const cfResults = await this.batchRun(cfTasks, 8);
       cloudflareResults.push(...cfResults.filter(Boolean));
+
+      console.log(`[SCAN_DEBUG] HTTP phase completed for Cloudflare IPs. Valid Cloudflare IPs: ${cloudflareResults.length}.`);
+
       const proxyTasks = proxyPingTcpSuccess.map(ipInfo => async () => {
         const result = await this.scanIP(ipInfo.ip, ipInfo.type);
-        // 只允许 200-299
-        return result && result.httpStatus >= 200 && result.httpStatus < 300 ? result : null;
+         if (result) {
+             console.log(`[SCAN_DEBUG] HTTP test for ${ipInfo.ip}: Status ${result.httpStatus}, Latency ${result.responseTime}ms.`);
+             // 只允许 200-299
+             if (result.httpStatus >= 200 && result.httpStatus < 300) {
+                 return result;
+             } else {
+                 console.log(`[SCAN_DEBUG] HTTP status not 2xx for ${ipInfo.ip}: ${result.httpStatus}`);
+                 return null;
+             }
+        } else {
+             console.log(`[SCAN_DEBUG] HTTP test failed for ${ipInfo.ip}`);
+             return null;
+        }
       });
       const proxyResultsArr = await this.batchRun(proxyTasks, 8);
       proxyResults.push(...proxyResultsArr.filter(Boolean));
+
+       console.log(`[SCAN_DEBUG] HTTP phase completed for Proxy IPs. Valid Proxy IPs: ${proxyResults.length}.`);
+
       // 4. 优先排序美国IP
       function usFirstSort(a, b) {
         const aUS = a.location && a.location.country === 'United States';
