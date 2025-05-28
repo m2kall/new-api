@@ -377,12 +377,12 @@ class IPScanner {
   // 单次 HTTP 测试
   async _singleHttpTest(host) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     const start = Date.now();
     let realSpeed = null;
     try {
       const response = await axios.get(`http://${host}`, {
-        timeout: 8000,
+        timeout: 15000,
         signal: controller.signal,
         responseType: 'arraybuffer',
         maxRedirects: 0,
@@ -408,7 +408,7 @@ class IPScanner {
       clearTimeout(timeoutId);
       const responseTime = Date.now() - start;
       return {
-        responseTime: responseTime > 8000 ? 8000 : responseTime,
+        responseTime: responseTime > 15000 ? 15000 : responseTime,
         speed: 'Timeout',
         realSpeed: null,
         status: 0
