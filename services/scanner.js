@@ -501,50 +501,36 @@ class IPScanner {
 
       console.log(`[SCAN_DEBUG] Generated ${cfIpsToScanRaw.length} Cloudflare IPs and ${proxyIpsToScanRaw.length} Proxy IPs.`);
 
-      const cloudflarePingTcpSuccess = [];
-      const proxyPingTcpSuccess = [];
+      const cloudflareTcpSuccess = [];
+      const proxyTcpSuccess = [];
 
-      // 2. 第一阶段：Ping + TCP
-      console.log('[SCAN_DEBUG] Starting Ping + TCP phase...');
+      // 2. 第一阶段：TCP 80 端口测试
+      console.log('[SCAN_DEBUG] Starting TCP 80 phase...');
       for (const ip of cfIpsToScanRaw) {
-          const latencyResult = await this.testLatency(ip);
-          if (latencyResult.alive) {
-              console.log(`[SCAN_DEBUG] Ping successful for ${ip} (${latencyResult.time}ms, ${latencyResult.packetLoss}).`);
-              // TCP 80 端口测试
-              const tcpResult = await this.tcpConnectTest(ip, 80);
-              if (tcpResult.success && tcpResult.latency < 1500) {
-                  console.log(`[SCAN_DEBUG] TCP successful for ${ip} (${tcpResult.latency}ms).`);
-                  cloudflarePingTcpSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'cloudflare' });
-              } else {
-                  console.log(`[SCAN_DEBUG] TCP failed for ${ip}: ${tcpResult.latency}ms or connect failed.`);
-              }
+          const tcpResult = await this.tcpConnectTest(ip, 80);
+          if (tcpResult.success && tcpResult.latency < 1500) {
+               console.log(`[SCAN_DEBUG] TCP successful for ${ip} (${tcpResult.latency}ms).`);
+              cloudflareTcpSuccess.push({ ip, type: 'cloudflare' });
           } else {
-              console.log(`[SCAN_DEBUG] Ping failed for ${ip} (${latencyResult.packetLoss}).`);
+               console.log(`[SCAN_DEBUG] TCP failed for ${ip}: ${tcpResult.latency}ms or connect failed.`);
           }
           await this.delay(scanDelay / 2);
       }
 
-      console.log(`[SCAN_DEBUG] Ping + TCP phase completed. Cloudflare IPs passed: ${cloudflarePingTcpSuccess.length}.`);
+      console.log(`[SCAN_DEBUG] TCP 80 phase completed. Cloudflare IPs passed: ${cloudflareTcpSuccess.length}.`);
 
       for (const ip of proxyIpsToScanRaw) {
-          const latencyResult = await this.testLatency(ip);
-          if (latencyResult.alive) {
-               console.log(`[SCAN_DEBUG] Ping successful for ${ip} (${latencyResult.time}ms, ${latencyResult.packetLoss}).`);
-              // TCP 80 端口测试
-              const tcpResult = await this.tcpConnectTest(ip, 80);
-              if (tcpResult.success && tcpResult.latency < 1500) {
-                  console.log(`[SCAN_DEBUG] TCP successful for ${ip} (${tcpResult.latency}ms).`);
-                  proxyPingTcpSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'proxy' });
-              } else {
-                   console.log(`[SCAN_DEBUG] TCP failed for ${ip}: ${tcpResult.latency}ms or connect failed.`);
-              }
+          const tcpResult = await this.tcpConnectTest(ip, 80);
+          if (tcpResult.success && tcpResult.latency < 1500) {
+               console.log(`[SCAN_DEBUG] TCP successful for ${ip} (${tcpResult.latency}ms).`);
+              proxyTcpSuccess.push({ ip, type: 'proxy' });
           } else {
-               console.log(`[SCAN_DEBUG] Ping failed for ${ip} (${latencyResult.packetLoss}).`);
+               console.log(`[SCAN_DEBUG] TCP failed for ${ip}: ${tcpResult.latency}ms or connect failed.`);
           }
           await this.delay(scanDelay / 2);
       }
 
-       console.log(`[SCAN_DEBUG] Ping + TCP phase completed. Proxy IPs passed: ${proxyPingTcpSuccess.length}.`);
+       console.log(`[SCAN_DEBUG] TCP 80 phase completed. Proxy IPs passed: ${proxyTcpSuccess.length}.`);
 
       // 3. 第二阶段：HTTP 测试和获取位置（并发）
        console.log('[SCAN_DEBUG] Starting HTTP phase...');
@@ -552,7 +538,7 @@ class IPScanner {
       const proxyResults = [];
 
       // 并发任务
-      const cfTasks = cloudflarePingTcpSuccess.map(ipInfo => async () => {
+      const cfTasks = cloudflareTcpSuccess.map(ipInfo => async () => {
         const result = await this.scanIP(ipInfo.ip, ipInfo.type);
         if (result) {
              console.log(`[SCAN_DEBUG] HTTP test for ${ipInfo.ip}: Status ${result.httpStatus}, Latency ${result.responseTime}ms.`);
@@ -573,7 +559,7 @@ class IPScanner {
 
       console.log(`[SCAN_DEBUG] HTTP phase completed for Cloudflare IPs. Valid Cloudflare IPs: ${cloudflareResults.length}.`);
 
-      const proxyTasks = proxyPingTcpSuccess.map(ipInfo => async () => {
+      const proxyTasks = proxyTcpSuccess.map(ipInfo => async () => {
         const result = await this.scanIP(ipInfo.ip, ipInfo.type);
          if (result) {
              console.log(`[SCAN_DEBUG] HTTP test for ${ipInfo.ip}: Status ${result.httpStatus}, Latency ${result.responseTime}ms.`);
