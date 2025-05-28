@@ -459,7 +459,27 @@ class IPScanner {
     };
   }
 
-  // 优化 performScan，HTTP 阶段并发8个
+  // 优化采样算法：从所有可用 CIDR 段均匀采样
+  generateIpListFromRanges(providers, totalCount = 100, ipsPerCidr = 3) {
+    const allCidrs = [];
+    for (const provider of providers) {
+      if (this.usIpRanges[provider]) {
+        allCidrs.push(...this.usIpRanges[provider]);
+      }
+    }
+    // 均匀采样：每个段都采样，直到达到 totalCount
+    const ipList = [];
+    let idx = 0;
+    while (ipList.length < totalCount && allCidrs.length > 0) {
+      const cidr = allCidrs[idx % allCidrs.length];
+      ipList.push(...this.generateIPsFromCIDR(cidr, 1));
+      idx++;
+    }
+    // 最终随机打乱，取前 totalCount 个
+    return ipList.sort(() => 0.5 - Math.random()).slice(0, totalCount);
+  }
+
+  // 优化 performScan，增加 TCP 阶段
   async performScan(options = {}) {
     if (this.isScanning) {
       console.log('扫描已在进行中...');
@@ -478,20 +498,28 @@ class IPScanner {
       // 1. 生成 IP 列表
       const cfIpsToScanRaw = this.generateIpListFromRanges(['cloudflare_us'], cloudflareScanCount, ipsPerCidrForCloudflare);
       const proxyIpsToScanRaw = this.generateIpListFromRanges(this.proxyProviders, proxyScanCount, ipsPerCidrForProxy);
-      const cloudflarePingSuccess = [];
-      const proxyPingSuccess = [];
-      // 2. 第一阶段：Ping
+      const cloudflarePingTcpSuccess = [];
+      const proxyPingTcpSuccess = [];
+      // 2. 第一阶段：Ping + TCP
       for (const ip of cfIpsToScanRaw) {
           const latencyResult = await this.testLatency(ip);
           if (latencyResult.alive) {
-              cloudflarePingSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'cloudflare' });
+              // TCP 80 端口测试
+              const tcpResult = await this.tcpConnectTest(ip, 80);
+              if (tcpResult.success && tcpResult.latency < 1500) {
+                  cloudflarePingTcpSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'cloudflare' });
+              }
           }
           await this.delay(scanDelay / 2);
       }
       for (const ip of proxyIpsToScanRaw) {
           const latencyResult = await this.testLatency(ip);
           if (latencyResult.alive) {
-              proxyPingSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'proxy' });
+              // TCP 80 端口测试
+              const tcpResult = await this.tcpConnectTest(ip, 80);
+              if (tcpResult.success && tcpResult.latency < 1500) {
+                  proxyPingTcpSuccess.push({ ip, latency: latencyResult.time, alive: true, packetLoss: latencyResult.packetLoss, type: 'proxy' });
+              }
           }
           await this.delay(scanDelay / 2);
       }
@@ -499,14 +527,16 @@ class IPScanner {
       const cloudflareResults = [];
       const proxyResults = [];
       // 并发任务
-      const cfTasks = cloudflarePingSuccess.map(ipInfo => async () => {
+      const cfTasks = cloudflarePingTcpSuccess.map(ipInfo => async () => {
         const result = await this.scanIP(ipInfo.ip, ipInfo.type);
+        // 只允许 200-299
         return result && result.httpStatus >= 200 && result.httpStatus < 300 ? result : null;
       });
       const cfResults = await this.batchRun(cfTasks, 8);
       cloudflareResults.push(...cfResults.filter(Boolean));
-      const proxyTasks = proxyPingSuccess.map(ipInfo => async () => {
+      const proxyTasks = proxyPingTcpSuccess.map(ipInfo => async () => {
         const result = await this.scanIP(ipInfo.ip, ipInfo.type);
+        // 只允许 200-299
         return result && result.httpStatus >= 200 && result.httpStatus < 300 ? result : null;
       });
       const proxyResultsArr = await this.batchRun(proxyTasks, 8);
@@ -591,26 +621,6 @@ class IPScanner {
       isScanning: this.isScanning,
       lastUpdate: this.results.lastUpdate
     };
-  }
-
-  // 根据 usIpRanges 和 provider 名称生成 IP 列表
-  generateIpListFromRanges(providers, totalCount = 100, ipsPerCidr = 3) {
-    // providers: ['cloudflare_us', 'aws_us', ...]
-    // usIpRanges: { cloudflare_us: [cidr1, cidr2, ...], ... }
-    const allCidrs = [];
-    for (const provider of providers) {
-      if (this.usIpRanges[provider]) {
-        allCidrs.push(...this.usIpRanges[provider]);
-      }
-    }
-    // 随机选取部分 CIDR，每个段生成 ipsPerCidr 个IP
-    const selectedCidrs = allCidrs.sort(() => 0.5 - Math.random()).slice(0, Math.ceil(totalCount / ipsPerCidr));
-    const ipList = [];
-    for (const cidr of selectedCidrs) {
-      ipList.push(...this.generateIPsFromCIDR(cidr, ipsPerCidr));
-    }
-    // 最终随机打乱，取前 totalCount 个
-    return ipList.sort(() => 0.5 - Math.random()).slice(0, totalCount);
   }
 
   // 兜底数据：如扫描结果为空时，添加一两个示例IP，防止前端页面完全无数据
