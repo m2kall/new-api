@@ -149,14 +149,16 @@ class IPScanner {
         resolve({ success: true, latency });
       });
       
-      socket.on('error', () => {
+      socket.on('error', (err) => {
+        console.log(`[TCP_DEBUG] TCP connect error for ${ip}:${port}: ${err.message}`);
         socket.destroy();
-        resolve({ success: false, latency: 9999 });
+        resolve({ success: false, latency: 9999, error: err.message });
       });
       
       socket.on('timeout', () => {
+        console.log(`[TCP_DEBUG] TCP connect timeout for ${ip}:${port}`);
         socket.destroy();
-        resolve({ success: false, latency: 9999 });
+        resolve({ success: false, latency: 9999, error: 'Timeout' });
       });
     });
   }
