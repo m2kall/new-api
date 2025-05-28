@@ -501,13 +501,13 @@ class IPScanner {
       // 并发任务
       const cfTasks = cloudflarePingSuccess.map(ipInfo => async () => {
         const result = await this.scanIP(ipInfo.ip, ipInfo.type);
-        return result && result.httpStatus >= 200 && result.httpStatus < 500 ? result : null;
+        return result && result.httpStatus >= 200 && result.httpStatus < 300 ? result : null;
       });
       const cfResults = await this.batchRun(cfTasks, 8);
       cloudflareResults.push(...cfResults.filter(Boolean));
       const proxyTasks = proxyPingSuccess.map(ipInfo => async () => {
         const result = await this.scanIP(ipInfo.ip, ipInfo.type);
-        return result && result.httpStatus >= 200 && result.httpStatus < 500 ? result : null;
+        return result && result.httpStatus >= 200 && result.httpStatus < 300 ? result : null;
       });
       const proxyResultsArr = await this.batchRun(proxyTasks, 8);
       proxyResults.push(...proxyResultsArr.filter(Boolean));
