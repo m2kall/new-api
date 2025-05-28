@@ -546,28 +546,26 @@ class IPScanner {
         const isCloudflareValid = await this.verifyCloudflareIP(ipInfo.ip);
         if (isCloudflareValid) {
             console.log(`[CLOUDFLARE] ${ipInfo.ip} verified as valid Cloudflare IP.`);
-            // 验证成功后，再进行一次 HTTP 测试获取延迟和速度等信息
+            // 验证成功后，无论 HTTP 状态码如何，都获取性能数据
             const httpResult = await this._singleHttpTest(ipInfo.ip);
-            if (httpResult.status >= 200 && httpResult.status < 300) {
-                 console.log(`[SCAN_DEBUG] HTTP test for ${ipInfo.ip}: Status ${httpResult.status}, Latency ${httpResult.responseTime}ms.`);
-                 const location = await this.getLocation(ipInfo.ip);
-                 let realSpeed = httpResult.realSpeed ? `${httpResult.realSpeed} MB/s` : httpResult.speed || 'N/A';
-                 return {
-                    ip: ipInfo.ip,
-                    type: 'cloudflare',
-                    latency: httpResult.responseTime ?? 9999, // 使用 HTTP 响应时间作为延迟
-                    alive: true, // 如果验证通过且 HTTP 2xx 则认为 alive
-                    packetLoss: '0%', // 假设 HTTP 2xx 表示无丢包
-                    speed: realSpeed,
-                    responseTime: httpResult.responseTime ?? 9999,
-                    httpStatus: httpResult.status ?? 0,
-                    location,
-                    lastTest: new Date().toISOString()
-                 };
-            } else {
-                 console.log(`[SCAN_DEBUG] HTTP status not 2xx after verification for ${ipInfo.ip}: ${httpResult.status}`);
-                 return null;
-            }
+            
+             console.log(`[SCAN_DEBUG] HTTP test for ${ipInfo.ip}: Status ${httpResult.status}, Latency ${httpResult.responseTime}ms.`);
+             
+             const location = await this.getLocation(ipInfo.ip);
+             let realSpeed = httpResult.realSpeed ? `${httpResult.realSpeed} MB/s` : httpResult.speed || 'N/A';
+             return {
+                ip: ipInfo.ip,
+                type: 'cloudflare',
+                latency: httpResult.responseTime ?? 9999, // 使用 HTTP 响应时间作为延迟
+                alive: true, // 如果 Cloudflare 验证通过则认为 alive
+                packetLoss: '0%', // 假设 HTTP 2xx 表示无丢包 (这个字段可能需要重新考虑是否保留或如何计算)
+                speed: realSpeed,
+                responseTime: httpResult.responseTime ?? 9999,
+                httpStatus: httpResult.status ?? 0,
+                location,
+                lastTest: new Date().toISOString()
+             };
+
         } else {
              console.log(`[CLOUDFLARE] ${ipInfo.ip} failed Cloudflare verification.`);
              return null;
